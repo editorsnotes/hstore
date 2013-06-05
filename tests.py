@@ -25,20 +25,41 @@ class HstoreTestCase(TestCase):
                 c.close()
     
     def setUp(self):
-        #try:
-        #    self.execute('DROP')
-        #except psycopg2.ProgrammingError:
-        #    pass # does not exist
         self.execute('CREATE')
         self.hstores = []
 
-    def open_hstore(self, connection_uri, name):
-        d = hstore.open(connection_uri, name)
+    def open_hstore(self, connection_or_uri, name, table='hstores'):
+        d = hstore.open(connection_or_uri, name, table=table)
         self.hstores.append(d)
         return d
 
     def test_open(self):
         d = self.open_hstore(connection_uri, 'test')
+
+    def test_open_two_with_same_name(self):
+        # same underlying table
+        d1 = self.open_hstore(connection_uri, 'test')
+        d2 = self.open_hstore(connection_uri, 'test')
+        d1['a'] = 'b'
+        self.assertEqual(d2['a'], 'b')
+        d2['a'] = 'c'
+        self.assertEqual(d1['a'], 'c')
+        
+    def test_open_two_with_different_tablenames(self):
+        # different underlying table
+        d1 = self.open_hstore(connection_uri, 'test')
+        d2 = self.open_hstore(connection_uri, 'test', table='anothertable')
+        d1['a'] = 'b'
+        with self.assertRaises(KeyError):
+            d2['a']
+        d2['a'] = 'c'
+        self.assertEqual(d1['a'], 'b')
+        
+    def test_open_with_existing_connection(self):
+        c = psycopg2.connect(connection_uri)
+        d = self.open_hstore(c, 'test')
+        d.close()
+        self.assertTrue(c.closed)
         
     def test_open_and_close(self):
         d = self.open_hstore(connection_uri, 'test')

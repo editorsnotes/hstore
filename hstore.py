@@ -28,10 +28,15 @@ INSERT INTO {table} (name)
 SELECT (%s) WHERE NOT EXISTS (SELECT name FROM {table} WHERE name = %s)
 """.format(table=TABLE_NAME), (self.name, self.name))
 
+    def _get_connection(self):
+        if self.connection.closed:
+            raise ValueError('hstore is closed')
+        return self.connection 
+
     def __getitem__(self, key):
         if not isinstance(key, basestring):
             raise TypeError('keys must be strings')
-        with self.connection.cursor() as c: 
+        with self._get_connection().cursor() as c: 
             c.execute("""
 SELECT data -> %s FROM {table} 
 WHERE name = %s
@@ -46,7 +51,7 @@ WHERE name = %s
             raise TypeError('keys must be strings')
         if not isinstance(value, basestring):
             raise TypeError('values must be strings')
-        with self.connection as con, con.cursor() as c:
+        with self._get_connection() as con, con.cursor() as c:
             c.execute("""
 UPDATE {table} SET data = data || hstore(%s, %s) 
 WHERE name = %s
@@ -55,14 +60,14 @@ WHERE name = %s
     def __delitem__(self, key):
         if not isinstance(key, basestring):
             raise TypeError('keys must be strings')
-        with self.connection as con, con.cursor() as c:
+        with self._get_connection() as con, con.cursor() as c:
             c.execute("""
 UPDATE {table} SET data = delete(data, %s) 
 WHERE name = %s
 """.format(table=TABLE_NAME), (key, self.name))
 
     def __iter__(self):
-        with self.connection.cursor() as c: 
+        with self._get_connection().cursor() as c: 
             c.execute("""
 SELECT skeys(data) FROM {table}
 WHERE name = %s
@@ -71,7 +76,7 @@ WHERE name = %s
                 yield r[0]
 
     def __len__(self):
-        with self.connection.cursor() as c: 
+        with self._get_connection().cursor() as c: 
             c.execute("""
 SELECT array_length(akeys(data), 1) FROM {table}
 WHERE name = %s

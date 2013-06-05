@@ -58,6 +58,18 @@ class HstoreTestCase(TestCase):
         d = self.open_hstore(connection_uri, 'test')
         d['foo'] = 'bar'
         
+    def test_access_after_close(self):
+        d = self.open_hstore(connection_uri, 'test')
+        d.close()
+        with self.assertRaises(ValueError):
+            d['foo']
+        with self.assertRaises(ValueError):
+            d['foo'] = 'bar'
+        with self.assertRaises(ValueError):
+            len(d)
+        with self.assertRaises(ValueError):
+            list(d.iteritems())
+        
     def test_store_and_retrieve_value(self):
         d = self.open_hstore(connection_uri, 'test')
         d['foo'] = 'bar'

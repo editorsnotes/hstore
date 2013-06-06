@@ -176,6 +176,28 @@ class HstoreTestCase(TestCase):
         self.assertEqual(sorted(d.iteritems()), 
                          [(u'bar',u'baz'),(u'foo',u'bar')])
 
+    def test_itervalues(self):
+        d = self.open_hstore(connection_uri, 'test')
+        d['foo'] = 'bar'
+        d['bar'] = 'baz'
+        d['xxx'] = 'bar'
+        self.assertEqual(sorted(d.itervalues()), 
+                         [u'bar',u'bar',u'baz'])
+
+    def test_items(self):
+        d = self.open_hstore(connection_uri, 'test')
+        d['foo'] = 'bar'
+        d['bar'] = 'baz'
+        self.assertEqual(sorted(d.items()), 
+                         [(u'bar',u'baz'),(u'foo',u'bar')])
+
+    def test_values(self):
+        d = self.open_hstore(connection_uri, 'test')
+        d['foo'] = 'bar'
+        d['bar'] = 'baz'
+        self.assertEqual(sorted(d.values()), 
+                         [u'bar',u'baz'])
+
     def test_contains(self):
         d = self.open_hstore(connection_uri, 'test')
         self.assertFalse('foo' in d)
@@ -203,6 +225,24 @@ class HstoreTestCase(TestCase):
         d = self.open_hstore(connection_uri, 'test')
         d.update({'foo':'bar','bar':'baz'})
         self.assertEqual(d, {'foo':'bar','bar':'baz'})
+
+    def test_destroy(self):
+        self.assertFalse(hstore.exists(connection_uri, 'test'))
+        c = self.open_connection(connection_uri)
+        d = hstore.open(c, 'test')
+        self.assertTrue(hstore.exists(connection_uri, 'test'))
+        del d
+        self.assertFalse(hstore.exists(connection_uri, 'test'))
+
+    def test_destroy_after_close(self):
+        self.assertFalse(hstore.exists(connection_uri, 'test'))
+        c = self.open_connection(connection_uri)
+        d = hstore.open(c, 'test')
+        self.assertTrue(hstore.exists(connection_uri, 'test'))
+        d.close()
+        del d
+        # still exists because we closed it first
+        self.assertTrue(hstore.exists(connection_uri, 'test'))
 
     def tearDown(self):
         [ h.close() for h in self.hstores ]

@@ -100,6 +100,30 @@ WHERE name = %s
             for r in c:
                 yield r[0]
 
+    def itervalues(self):
+        with self._get_connection().cursor() as c: 
+            c.execute("""
+SELECT svals(data) FROM {table}
+WHERE name = %s
+""".format(table=self.table), (self.name,))
+            for r in c:
+                yield r[0]
+
+    def iteritems(self):
+        with self._get_connection().cursor() as c: 
+            c.execute("""
+SELECT hstore_to_matrix(data) FROM {table}
+WHERE name = %s
+""".format(table=self.table), (self.name,))
+            for pair in c.fetchone()[0]:
+                yield tuple(pair)
+
+    def items(self):
+        return list(self.iteritems())
+
+    def values(self):
+        return list(self.itervalues())
+
     def __len__(self):
         with self._get_connection().cursor() as c: 
             c.execute("""
@@ -110,4 +134,15 @@ WHERE name = %s
 
     def close(self):
         self.connection.close()
+
+    def __del__(self):
+        if not self.connection.closed:
+            with self.connection as con, con.cursor() as c:
+                c.execute("""
+DELETE FROM {table}
+WHERE name = %s
+""".format(table=self.table), (self.name,))
+
+        
+        
         

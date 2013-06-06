@@ -5,3 +5,4 @@ lib
 share
 src
 *.pyc
+*.egg-info

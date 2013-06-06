@@ -27,14 +27,31 @@ class HstoreTestCase(TestCase):
     def setUp(self):
         self.execute('CREATE')
         self.hstores = []
+        self.connections = []
 
     def open_hstore(self, connection_or_uri, name, table='hstores'):
         d = hstore.open(connection_or_uri, name, table=table)
         self.hstores.append(d)
         return d
 
+    def open_connection(self, uri):
+        c = psycopg2.connect(uri)
+        self.connections.append(c)
+        return c
+
     def test_open(self):
         d = self.open_hstore(connection_uri, 'test')
+
+    def test_exists(self):
+        self.assertFalse(
+            hstore.exists(connection_uri, 'test'))
+        self.assertFalse(
+            hstore.exists(self.open_connection(connection_uri), 'test'))
+        self.open_hstore(connection_uri, 'test')
+        self.assertTrue(
+            hstore.exists(connection_uri, 'test'))
+        self.assertTrue(
+            hstore.exists(self.open_connection(connection_uri), 'test'))
 
     def test_open_two_with_same_name(self):
         # same underlying table
@@ -56,7 +73,7 @@ class HstoreTestCase(TestCase):
         self.assertEqual(d1['a'], 'b')
         
     def test_open_with_existing_connection(self):
-        c = psycopg2.connect(connection_uri)
+        c = self.open_connection(connection_uri)
         d = self.open_hstore(c, 'test')
         d.close()
         self.assertTrue(c.closed)
@@ -189,6 +206,8 @@ class HstoreTestCase(TestCase):
 
     def tearDown(self):
         [ h.close() for h in self.hstores ]
+        for c in self.connections: del c
         self.hstores = []
+        self.connections = []
         self.execute('DROP')
         

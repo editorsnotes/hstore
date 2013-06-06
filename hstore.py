@@ -3,13 +3,38 @@ import psycopg2.extras
 import psycopg2.extensions
 from collections import MutableMapping
 
+def _execute(c, func, close=False):
+    if hasattr(c, 'cursor'):
+        close = False
+    else:
+        c = psycopg2.connect(c)
+    try:
+        return func(c)
+    finally:
+        if close: c.close()
+
 def open(c, name, table='hstores'):
-    if not hasattr(c, 'cursor'):
-        c = psycopg2.connect(c)   
-    c.cursor().execute('CREATE EXTENSION IF NOT EXISTS hstore')
-    psycopg2.extras.register_hstore(c)
-    psycopg2.extensions.register_type(psycopg2.extensions.UNICODE, c)
-    return Hstore(c, name, table)
+    def open_hstore(c):
+        c.cursor().execute('CREATE EXTENSION IF NOT EXISTS hstore')
+        psycopg2.extras.register_hstore(c)
+        psycopg2.extensions.register_type(psycopg2.extensions.UNICODE, c)
+        return Hstore(c, name, table)
+    return _execute(c, open_hstore)
+
+def exists(c, name, table='hstores'):
+    def hstore_exists(c):
+        with c.cursor() as cur:
+            try:
+                cur.execute("""
+SELECT COUNT(name) FROM {table}
+WHERE name = %s
+""".format(table=table), (name,))
+                return (cur.fetchone()[0] > 0)
+            except psycopg2.ProgrammingError as e:
+                if e.pgcode == '42P01':
+                    return False
+                raise e
+    return _execute(c, hstore_exists, close=True)
 
 class Hstore(MutableMapping):
 

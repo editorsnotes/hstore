@@ -1,6 +1,4 @@
 import psycopg2
-import psycopg2.extras
-import psycopg2.extensions
 from collections import MutableMapping
 
 def _execute(c, func, close=False):
@@ -16,8 +14,6 @@ def _execute(c, func, close=False):
 def open(c, name, table='hstores'):
     def open_hstore(c):
         c.cursor().execute('CREATE EXTENSION IF NOT EXISTS hstore')
-        psycopg2.extras.register_hstore(c)
-        psycopg2.extensions.register_type(psycopg2.extensions.UNICODE, c)
         return Hstore(c, name, table)
     return _execute(c, open_hstore)
 
@@ -58,9 +54,13 @@ SELECT (%s) WHERE NOT EXISTS (SELECT name FROM {table} WHERE name = %s)
             raise ValueError('hstore is closed')
         return self.connection 
 
+    def _encode(self, s):
+        if not isinstance(s, basestring):
+            raise TypeError('{} is not a string'.format(s))
+        return s.encode('utf-8') if isinstance(s, unicode) else s
+
     def __getitem__(self, key):
-        if not isinstance(key, basestring):
-            raise TypeError('keys must be strings')
+        key = self._encode(key)
         with self._get_connection().cursor() as c: 
             c.execute("""
 SELECT data -> %s FROM {table} 
@@ -72,10 +72,8 @@ WHERE name = %s
             return value
 
     def __setitem__(self, key, value):
-        if not isinstance(key, basestring):
-            raise TypeError('keys must be strings')
-        if not isinstance(value, basestring):
-            raise TypeError('values must be strings')
+        key = self._encode(key)
+        value = self._encode(value)
         with self._get_connection() as con, con.cursor() as c:
             c.execute("""
 UPDATE {table} SET data = data || hstore(%s, %s) 
@@ -83,8 +81,7 @@ WHERE name = %s
 """.format(table=self.table), (key, value, self.name))
 
     def __delitem__(self, key):
-        if not isinstance(key, basestring):
-            raise TypeError('keys must be strings')
+        key = self._encode(key)
         with self._get_connection() as con, con.cursor() as c:
             c.execute("""
 UPDATE {table} SET data = delete(data, %s) 

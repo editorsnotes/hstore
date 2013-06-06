@@ -114,13 +114,16 @@ class HstoreTestCase(TestCase):
         d.close()
         d = self.open_hstore(connection_uri, 'test')
         self.assertEqual(d['foo'], 'bar')
+        self.assertTrue(isinstance(d['foo'], str))
 
     def test_store_and_retrieve_unicode(self):
         d = self.open_hstore(connection_uri, 'test')
         d['foo'] = u'日本語'
         d.close()
         d = self.open_hstore(connection_uri, 'test')
-        self.assertEqual(d['foo'], u'日本語')
+        # comes back as a UTF-8 string
+        self.assertEqual(d['foo'], u'日本語'.encode('utf-8'))
+        self.assertTrue(isinstance(d['foo'], str))
 
     def test_unicode_key(self):
         d = self.open_hstore(connection_uri, 'test')

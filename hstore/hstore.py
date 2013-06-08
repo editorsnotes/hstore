@@ -1,4 +1,5 @@
 import psycopg2
+import psycopg2.extras
 from collections import MutableMapping
 
 def _execute(c, func, close=False):
@@ -14,6 +15,7 @@ def _execute(c, func, close=False):
 def open(c, name, table='hstores'):
     def open_hstore(c):
         c.cursor().execute('CREATE EXTENSION IF NOT EXISTS hstore')
+        psycopg2.extras.register_hstore(c)
         return Hstore(c, name, table)
     return _execute(c, open_hstore)
 
@@ -38,21 +40,13 @@ class Hstore(MutableMapping):
         self.connection = connection
         self.name = name
         self.table = table
-        with self.connection as con, con.cursor() as c:
-            c.execute("""
-CREATE TABLE IF NOT EXISTS {table} (
-  name text   PRIMARY KEY,
-  data hstore NOT NULL DEFAULT hstore('') )
-""".format(table=self.table))
-            c.execute("""
-INSERT INTO {table} (name) 
-SELECT (%s) WHERE NOT EXISTS (SELECT name FROM {table} WHERE name = %s)
-""".format(table=self.table), (self.name, self.name))
+        self.data = {}
+        self.added = {}
+        self.deleted = set()
+        self.sync()
 
-    def _get_connection(self):
-        if self.connection.closed:
-            raise ValueError('hstore is closed')
-        return self.connection 
+    def _check_open(self):
+        if self.connection.closed: raise ValueError('hstore is closed')
 
     def _encode(self, s):
         if not isinstance(s, basestring):
@@ -60,85 +54,84 @@ SELECT (%s) WHERE NOT EXISTS (SELECT name FROM {table} WHERE name = %s)
         return s.encode('utf-8') if isinstance(s, unicode) else s
 
     def __getitem__(self, key):
+        self._check_open()
         key = self._encode(key)
-        with self._get_connection().cursor() as c: 
-            c.execute("""
-SELECT data -> %s FROM {table} 
-WHERE name = %s
-""".format(table=self.table), (key, self.name))
-            value = c.fetchone()[0]
-            if value is None:
-                raise KeyError(key)
-            return value
+        return self.data[key]
 
     def __setitem__(self, key, value):
+        self._check_open()
         key = self._encode(key)
         value = self._encode(value)
-        with self._get_connection() as con, con.cursor() as c:
-            c.execute("""
-UPDATE {table} SET data = data || hstore(%s, %s) 
-WHERE name = %s
-""".format(table=self.table), (key, value, self.name))
+        self.added[key] = value
+        self.data[key] = value
+        if key in self.deleted:
+            self.deleted.remove(key)
 
     def __delitem__(self, key):
+        self._check_open()
         key = self._encode(key)
-        with self._get_connection() as con, con.cursor() as c:
-            c.execute("""
-UPDATE {table} SET data = delete(data, %s) 
-WHERE name = %s
-""".format(table=self.table), (key, self.name))
+        self.deleted.add(key)
+        del self.data[key]
+        if key in self.added:
+            del self.added[key]
 
     def __iter__(self):
-        with self._get_connection().cursor() as c: 
-            c.execute("""
-SELECT skeys(data) FROM {table}
-WHERE name = %s
-""".format(table=self.table), (self.name,))
-            for r in c:
-                yield r[0]
-
-    def itervalues(self):
-        with self._get_connection().cursor() as c: 
-            c.execute("""
-SELECT svals(data) FROM {table}
-WHERE name = %s
-""".format(table=self.table), (self.name,))
-            for r in c:
-                yield r[0]
-
-    def iteritems(self):
-        with self._get_connection().cursor() as c: 
-            c.execute("""
-SELECT hstore_to_matrix(data) FROM {table}
-WHERE name = %s
-""".format(table=self.table), (self.name,))
-            for pair in c.fetchone()[0]:
-                yield tuple(pair)
-
-    def items(self):
-        return list(self.iteritems())
-
-    def values(self):
-        return list(self.itervalues())
+        self._check_open()
+        return iter(self.data)
 
     def __len__(self):
-        with self._get_connection().cursor() as c: 
+        self._check_open()
+        return len(self.data)
+
+    def sync(self):
+        self._check_open()
+        with self.connection as con, con.cursor() as c:
+            # create table if needed
             c.execute("""
-SELECT array_length(akeys(data), 1) FROM {table}
+CREATE TABLE IF NOT EXISTS {table} (
+  name text   PRIMARY KEY,
+  data hstore NOT NULL DEFAULT hstore('') )
+""".format(table=self.table))
+            # create row if needed
+            c.execute("""
+INSERT INTO {table} (name) 
+SELECT (%s) WHERE NOT EXISTS (SELECT name FROM {table} WHERE name = %s)
+""".format(table=self.table), (self.name, self.name))
+            # update hstore
+            if len(self.added) > 0 or len(self.deleted) > 0:
+                if len(self.deleted) > 0:
+                    c.execute("""
+UPDATE {table} SET data = (data || %s) - %s
+WHERE name = %s
+""".format(table=self.table), (self.added, list(self.deleted), self.name))
+                else:
+                    # pg doesn't like empty lists?
+                    c.execute("""
+UPDATE {table} SET data = data || %s
+WHERE name = %s
+""".format(table=self.table), (self.added, self.name))
+            # pull hstore content
+            c.execute("""
+SELECT data FROM {table} 
 WHERE name = %s
 """.format(table=self.table), (self.name,))
-            return c.fetchone()[0] or 0
+            self.data = c.fetchone()[0]
+            self.added.clear()
+            self.deleted.clear()
 
-    def close(self):
-        self.connection.close()
-
-    def __del__(self):
-        if not self.connection.closed:
-            with self.connection as con, con.cursor() as c:
-                c.execute("""
+    def destroy(self):
+        self._check_open()
+        with self.connection as con, con.cursor() as c:
+            c.execute("""
 DELETE FROM {table}
 WHERE name = %s
 """.format(table=self.table), (self.name,))
+
+    def close(self):
+        if not self.connection.closed:
+            self.sync()
+            self.connection.close()
+
 
         
         

@@ -47,7 +47,7 @@ class HstoreTestCase(TestCase):
             hstore.exists(connection_uri, 'test'))
         self.assertFalse(
             hstore.exists(self.open_connection(connection_uri), 'test'))
-        self.open_hstore(connection_uri, 'test')
+        d = self.open_hstore(connection_uri, 'test')
         self.assertTrue(
             hstore.exists(connection_uri, 'test'))
         self.assertTrue(
@@ -58,20 +58,55 @@ class HstoreTestCase(TestCase):
         d1 = self.open_hstore(connection_uri, 'test')
         d2 = self.open_hstore(connection_uri, 'test')
         d1['a'] = 'b'
+        d1.sync()
+        with self.assertRaises(KeyError):
+            d2['a'] # haven't synced yet
+
+        d2.sync()
         self.assertEqual(d2['a'], 'b')
+
         d2['a'] = 'c'
+        d2.sync()
+
+        self.assertEqual(d1['a'], 'b') # no sync yet
+        d1.sync()
         self.assertEqual(d1['a'], 'c')
-        
+
     def test_open_two_with_different_tablenames(self):
         # different underlying table
         d1 = self.open_hstore(connection_uri, 'test')
         d2 = self.open_hstore(connection_uri, 'test', table='anothertable')
         d1['a'] = 'b'
+        d1.sync()
         with self.assertRaises(KeyError):
             d2['a']
         d2['a'] = 'c'
+        d2.sync()
         self.assertEqual(d1['a'], 'b')
+    
+    def test_set_then_del(self):
+        d1 = self.open_hstore(connection_uri, 'test')
+        d1['foo'] = 'bar'
+        d1.sync()
+        d1['foo'] = 'baz'
+        del d1['foo']
+        d1.sync()
         
+        d2 = self.open_hstore(connection_uri, 'test')
+        with self.assertRaises(KeyError):
+            d2['foo']
+
+    def test_del_then_set(self):
+        d1 = self.open_hstore(connection_uri, 'test')
+        d1['foo'] = 'bar'
+        d1.sync()
+        del d1['foo']
+        d1['foo'] = 'baz'
+        d1.sync()
+        
+        d2 = self.open_hstore(connection_uri, 'test')
+        self.assertEqual(d2['foo'], 'baz')
+
     def test_open_with_existing_connection(self):
         c = self.open_connection(connection_uri)
         d = self.open_hstore(c, 'test')
@@ -234,7 +269,7 @@ class HstoreTestCase(TestCase):
         c = self.open_connection(connection_uri)
         d = hstore.open(c, 'test')
         self.assertTrue(hstore.exists(connection_uri, 'test'))
-        del d
+        d.destroy()
         self.assertFalse(hstore.exists(connection_uri, 'test'))
 
     def test_destroy_after_close(self):
@@ -243,9 +278,25 @@ class HstoreTestCase(TestCase):
         d = hstore.open(c, 'test')
         self.assertTrue(hstore.exists(connection_uri, 'test'))
         d.close()
-        del d
-        # still exists because we closed it first
-        self.assertTrue(hstore.exists(connection_uri, 'test'))
+        with self.assertRaises(ValueError):
+            d.destroy() # must be open to destroy
+
+    def test_popitem(self):
+        d = self.open_hstore(connection_uri, 'test')
+        with self.assertRaises(KeyError):
+            d.popitem()
+
+        d['foo'] = 'bar'
+        self.assertEquals(d.popitem(), ('foo','bar'))
+        with self.assertRaises(KeyError):
+            d.popitem()
+
+        d['foo'] = 'bar'
+        d.sync()
+        self.assertEquals(d.popitem(), ('foo','bar'))
+        d.sync()
+        with self.assertRaises(KeyError):
+            d.popitem()
 
     def tearDown(self):
         [ h.close() for h in self.hstores ]
